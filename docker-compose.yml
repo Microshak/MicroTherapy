@@ -1,0 +1,53 @@
+services:
+  # MicroTherapy TTS MCP Server
+  microtherapy:
+    build: .
+    container_name: microtherapy-server
+    ports:
+      - "127.0.0.1:3001:3001"  # MCP HTTP endpoint
+    environment:
+      - HOST=0.0.0.0
+      - PORT=3001
+      - MICROTHERAPY_DEBUG_SAVE_AUDIO=1
+    volumes:
+      # Mount HF cache for model weights (avoid re-downloading)
+      - hf_cache:/home/microtherapy/.cache/huggingface
+      # Mount debug audio output so host can inspect generated files
+      - ./assets/audio:/app/assets/audio
+      # Mount configs for live tweaking
+      - ./configs:/app/configs
+    restart: unless-stopped
+    # Give the model time to download + load on first start
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3001/mcp"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+
+  # MCPJam Inspector — a better inspector that handles direct HTTP
+  inspector:
+    image: mcpjam/mcp-inspector:latest
+    container_name: microtherapy-inspector
+    network_mode: "host"
+    # No port mapping needed in host mode — inspector listens on 6274 directly
+
+  # Arize Phoenix — observability & tracing for AI agents
+  phoenix:
+    image: arizephoenix/phoenix:latest
+    container_name: microtherapy-phoenix
+    ports:
+      - "127.0.0.1:16006:6006"  # Phoenix web UI (remapped)
+      - "127.0.0.1:14317:4317"  # OTLP gRPC (remapped)
+      - "127.0.0.1:14318:4318"  # OTLP HTTP (remapped)
+    environment:
+      - PHOENIX_WORKING_DIR=/phoenix-data
+      - PHOENIX_ENABLE_MCP_SERVER=true
+      - PHOENIX_ENABLE_MCP_CODE_MODE=true
+    volumes:
+      - phoenix_data:/phoenix-data
+    restart: unless-stopped
+
+volumes:
+  phoenix_data:
+  hf_cache:
