@@ -38,6 +38,10 @@ COPY src/ src/
 # Reinstall in editable mode so source files are used directly
 RUN uv pip install --system --prerelease=allow -e .
 
+# Pre-download spacy model via pip so it's baked into the image
+RUN uv pip install --system \
+    https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl
+
 # Create a non-root user and pre-create the HF cache dir with correct ownership
 RUN useradd --create-home --shell /bin/bash microtherapy && \
     mkdir -p /home/microtherapy/.cache/huggingface && \

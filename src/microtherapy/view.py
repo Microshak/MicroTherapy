@@ -45,13 +45,20 @@ EMBEDDED_VIEW_HTML = r"""<!DOCTYPE html>
     background: color-mix(in srgb, var(--mt-accent) 6%, transparent);
     white-space: pre-wrap; word-break: break-word;
   }
+  .play-btn, .test-btn {
+    width: 100%; padding: 10px; border: none; border-radius: 8px;
+    font-size: 15px; cursor: pointer; margin-bottom: 8px;
+  }
   .play-btn {
-    display: none; width: 100%; padding: 10px; border: none; border-radius: 8px;
-    background: var(--mt-accent); color: white; font-size: 15px; cursor: pointer;
-    margin-bottom: 8px;
+    display: none; background: var(--mt-accent); color: white;
   }
   .play-btn:hover { opacity: 0.9; }
   .play-btn.visible { display: block; }
+  .test-btn {
+    background: color-mix(in srgb, var(--mt-accent) 20%, transparent);
+    color: var(--mt-accent); border: 1px solid var(--mt-accent);
+  }
+  .test-btn:hover { background: color-mix(in srgb, var(--mt-accent) 30%, transparent); }
   .error { color: #ef4444; font-size: 13px; margin-top: 8px; display: none; }
   .debug {
     font-size: 10px; color: var(--mt-muted); margin-top: 8px; max-height: 80px;
@@ -68,6 +75,8 @@ EMBEDDED_VIEW_HTML = r"""<!DOCTYPE html>
   </div>
   <div class="player-text" id="text">Waiting for text...</div>
   <button class="play-btn" id="playBtn">▶ Play</button>
+  <button class="test-btn" id="replayBtn">🔁 Replay Speech</button>
+  <button class="test-btn" id="testBtn">🔊 Test Beep</button>
   <div class="error" id="error"></div>
   <div class="debug" id="debug"></div>
 </div>
@@ -75,7 +84,8 @@ EMBEDDED_VIEW_HTML = r"""<!DOCTYPE html>
 <script type="importmap">
 {
   "imports": {
-    "@modelcontextprotocol/ext-apps": "https://esm.sh/@modelcontextprotocol/ext-apps@1.7.5"
+    "@modelcontextprotocol/ext-apps": "https://esm.sh/@modelcontextprotocol/ext-apps@1.7.5?deps=zod@3.25.1",
+    "zod": "https://esm.sh/zod@3.25.1"
   }
 }
 </script>
@@ -85,6 +95,8 @@ const badge = $('badge'), textEl = $('text'), playBtn = $('playBtn');
 const errorEl = $('error'), debugEl = $('debug');
 
 const SERVER = 'http://localhost:3001';
+
+let lastQueueId = null;  // most recent speak queue, for replay
 
 function log(msg) {
   console.log('[MT]', msg);
@@ -105,16 +117,25 @@ async function callTool(name, args) {
       log('SDK call failed: ' + e + ', trying fetch...');
     }
   }
-  // Direct fetch fallback
+  return callToolDirect(name, args);
+}
+
+// Direct HTTP fetch, used for LARGE tool results (host cancels big SDK calls)
+async function callToolDirect(name, args) {
   const resp = await fetch(SERVER + '/mcp', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'Accept': 'application/json, text/event-stream' },
-    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } })
+    body: JSON.stringify({ jsonrpc: '2.0', id: Math.floor(Math.random() * 1e9), method: 'tools/call', params: { name, arguments: args } })
   });
+  if (!resp.ok) throw new Error('HTTP ' + resp.status);
   const text = await resp.text();
-  const match = text.match(/data:\s*(\{.*\})/);
-  if (!match) throw new Error('No SSE data');
-  const r = JSON.parse(match[1]);
+  // Robust SSE parse: collect all data: lines
+  const parts = [];
+  for (const line of text.split('\n')) {
+    if (line.startsWith('data:')) parts.push(line.slice(5).trim());
+  }
+  if (!parts.length) throw new Error('No SSE data');
+  const r = JSON.parse(parts.join(''));
   if (r.error) throw new Error(r.error.message || 'Tool error');
   return JSON.parse(r.result.content[0].text);
 }
@@ -154,51 +175,99 @@ function buildWav(pcmBytes, sampleRate) {
 
 async function collectAndPlay(queueId) {
   log('Waiting for audio: ' + queueId);
-  badge.textContent = 'Loading...';
-  
-  // Poll for the complete WAV
-  for (let i = 0; i < 300; i++) {
+  badge.textContent = 'Generating...';
+
+  // Phase 1: poll lightweight status until the server finishes generating
+  for (let i = 0; i < 720; i++) {   // up to ~6 min at 500ms
+    let data;
     try {
-      const data = await callTool('get_full_audio', { audio_id: queueId });
-      
-      if (data.status === 'complete') {
-        log('Got full WAV, ' + data.duration_ms + 'ms');
-        
-        // Decode base64 WAV and play via Web Audio API
-        const wavBytes = Uint8Array.from(atob(data.audio_b64), c => c.charCodeAt(0));
-        
-        const ctx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 24000 });
-        if (ctx.state === 'suspended') await ctx.resume();
-        
-        try {
-          const audioBuffer = await ctx.decodeAudioData(wavBytes.buffer.slice(0));
-          const source = ctx.createBufferSource();
-          source.buffer = audioBuffer;
-          source.connect(ctx.destination);
-          
-          badge.textContent = 'Playing...';
-          source.onended = () => { badge.textContent = 'Done ✓'; ctx.close(); };
-          source.start(0);
-          return;
-        } catch(e) {
-          log('decodeAudioData failed: ' + e);
-          badge.textContent = '⚠ Decode error';
-          return;
-        }
-      } else if (data.status === 'waiting') {
-        await new Promise(r => setTimeout(r, 100));
-      } else {
-        log('Status: ' + data.status);
-        await new Promise(r => setTimeout(r, 100));
-      }
+      data = await callTool('get_speak_status', { audio_id: queueId });
     } catch(e) {
-      log('Poll err: ' + e);
-      await new Promise(r => setTimeout(r, 200));
+      log('Status poll err: ' + e);
+      await new Promise(r => setTimeout(r, 1000));
+      continue;
+    }
+
+    if (data.status === 'complete') {
+      badge.textContent = 'Downloading...';
+      return fetchAndPlay(queueId);
+    } else if (data.status === 'error') {
+      log('Server error: ' + (data.error || 'unknown'));
+      badge.textContent = '⚠ ' + (data.error || 'Error');
+      return;
+    } else {
+      const secs = Math.round((data.progress_ms || 0) / 1000);
+      badge.textContent = secs > 0 ? ('Generating... ' + secs + 's') : 'Generating...';
+      await new Promise(r => setTimeout(r, 500));
     }
   }
-  
+
   log('Timed out waiting for audio');
-  badge.textContent = '⚠ Timeout';
+  badge.textContent = '⚠ Timeout — click Replay';
+}
+
+// Phase 2: download the ONE complete WAV file, then play it
+async function fetchAndPlay(queueId) {
+  // Preferred: plain file endpoint (simple GET, no JSON/SSE/base64)
+  const fileUrl = SERVER + '/audio/' + queueId + '.wav';
+  for (let attempt = 0; attempt < 4; attempt++) {
+    try {
+      const resp = await fetch(fileUrl);
+      if (resp.ok) {
+        const buf = await resp.arrayBuffer();
+        if (buf.byteLength > 44) {
+          log('Downloaded WAV via /audio: ' + buf.byteLength + ' bytes');
+          return playArrayBuffer(buf);
+        }
+      }
+      log('File endpoint returned ' + resp.status + ' — trying MCP tool');
+      // Fallback: full audio via MCP tool (JSON + base64)
+      const data = await callToolDirect('get_full_audio', { audio_id: queueId });
+      if (data.status === 'complete' && data.audio_b64) {
+        log('Got full WAV via MCP tool, ' + data.duration_ms + 'ms');
+        const wavBytes = Uint8Array.from(atob(data.audio_b64), c => c.charCodeAt(0));
+        return playArrayBuffer(wavBytes.buffer.slice(0));
+      }
+      if (data.status === 'waiting') {
+        // Rare race: status said complete but WAV not built yet — retry soon
+        log('WAV not ready yet, retrying...');
+        await new Promise(r => setTimeout(r, 500));
+        continue;
+      }
+      log('Status: ' + data.status);
+      await new Promise(r => setTimeout(r, 500));
+    } catch(e) {
+      log('Download attempt ' + (attempt + 1) + ' failed: ' + e);
+      await new Promise(r => setTimeout(r, 1000));
+    }
+  }
+  badge.textContent = '⚠ Download error — click Replay';
+}
+
+async function playArrayBuffer(arrayBuffer) {
+  const ctx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 24000 });
+  if (ctx.state === 'suspended') {
+    try { await ctx.resume(); } catch(e) { log('resume failed: ' + e); }
+  }
+  if (ctx.state === 'suspended') {
+    // Autoplay blocked by the browser — user must click to hear audio
+    log('Autoplay blocked — click 🔁 Replay Speech');
+    badge.textContent = '🔊 Ready — click Replay';
+    return;
+  }
+
+  try {
+    const audioBuffer = await ctx.decodeAudioData(arrayBuffer);
+    const source = ctx.createBufferSource();
+    source.buffer = audioBuffer;
+    source.connect(ctx.destination);
+    badge.textContent = 'Playing...';
+    source.onended = () => { badge.textContent = 'Done ✓'; ctx.close(); };
+    source.start(0);
+  } catch(e) {
+    log('decodeAudioData failed: ' + e);
+    badge.textContent = '⚠ Decode error';
+  }
 }
 
 function handleSpeakResult(result) {
@@ -206,12 +275,98 @@ function handleSpeakResult(result) {
   try {
     const data = JSON.parse(result?.content?.[0]?.text || '{}');
     if (data.queue_id) {
+      lastQueueId = data.queue_id;
       textEl.textContent = data.text || '';
       errorEl.style.display = 'none';
       collectAndPlay(data.queue_id);
+    } else {
+      // No speak queue in this result (e.g. test_play) — play latest speech if any
+      checkLatestSpeak();
     }
   } catch(e) { log('Parse err: ' + e); }
 }
+
+async function checkLatestSpeak() {
+  try {
+    const data = await callTool('get_latest_speak', {});
+    if (data.queue_id) {
+      lastQueueId = data.queue_id;
+      textEl.textContent = data.text || '';
+      log('Found latest speak: ' + data.queue_id);
+      collectAndPlay(data.queue_id);
+      return true;
+    }
+  } catch(e) { log('No latest speak'); }
+  return false;
+}
+
+async function replaySpeech() {
+  const btn = $('replayBtn');
+  btn.disabled = true;
+  btn.textContent = 'Loading...';
+  badge.textContent = 'Replaying...';
+  try {
+    let queueId = lastQueueId;
+    if (!queueId) {
+      // No result seen in this view yet — ask the server for the latest queue
+      const data = await callTool('get_latest_speak', {});
+      queueId = data.queue_id;
+      if (queueId) {
+        lastQueueId = queueId;
+        textEl.textContent = data.text || '';
+      }
+    }
+    if (!queueId) {
+      badge.textContent = 'No speech yet';
+      textEl.textContent = 'Nothing to replay — no speech has been generated in this session.';
+    } else {
+      log('Replaying queue: ' + queueId);
+      await collectAndPlay(queueId);
+    }
+  } catch (e) {
+    log('Replay failed: ' + e);
+    badge.textContent = '⚠ Replay error';
+    errorEl.textContent = e.message;
+    errorEl.style.display = 'block';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '🔁 Replay Speech';
+  }
+}
+
+$('replayBtn').addEventListener('click', replaySpeech);
+
+async function playTestBeep() {
+  const btn = $('testBtn');
+  btn.disabled = true;
+  btn.textContent = 'Loading...';
+  badge.textContent = 'Fetching...';
+  try {
+    const data = await callTool('test_play', {});
+    if (data.status !== 'ready') throw new Error(data.error || 'Unknown error');
+    const wavBytes = Uint8Array.from(atob(data.audio_b64), c => c.charCodeAt(0));
+    const ctx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: data.sample_rate || 24000 });
+    if (ctx.state === 'suspended') await ctx.resume();
+    const audioBuffer = await ctx.decodeAudioData(wavBytes.buffer.slice(0));
+    const source = ctx.createBufferSource();
+    source.buffer = audioBuffer;
+    source.connect(ctx.destination);
+    badge.textContent = 'Playing...';
+    source.onended = () => { badge.textContent = 'Done ✓'; ctx.close(); };
+    source.start(0);
+    textEl.textContent = 'Playing test beep (440 Hz, 1 sec)';
+  } catch (e) {
+    log('Test beep failed: ' + e);
+    badge.textContent = '⚠ Error';
+    errorEl.textContent = e.message;
+    errorEl.style.display = 'block';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '🔊 Test Beep';
+  }
+}
+
+$('testBtn').addEventListener('click', playTestBeep);
 
 // ── Listen for tool results via postMessage ────────────
 let _gotResult = false;
@@ -246,6 +401,7 @@ try {
       const data = await callTool('get_latest_speak', {});
       if (data.queue_id) {
         log('Found pending: ' + data.queue_id);
+        lastQueueId = data.queue_id;
         textEl.textContent = data.text || '';
         collectAndPlay(data.queue_id);
       }
@@ -262,6 +418,7 @@ try {
         const data = await callTool('get_latest_speak', {});
         if (data.queue_id) {
           log('Found pending (direct): ' + data.queue_id);
+          lastQueueId = data.queue_id;
           textEl.textContent = data.text || '';
           collectAndPlay(data.queue_id);
           return;
