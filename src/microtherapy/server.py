@@ -251,7 +251,7 @@ def get_full_audio(audio_id: str) -> CallToolResult:
     meta={
         "ui": {
             "csp": {
-                "resourceDomains": ["https://esm.sh", "https://unpkg.com", "http://localhost:3002"],
+                "resourceDomains": ["https://esm.sh", "https://unpkg.com", "http://localhost:3001"],
             }
         }
     },

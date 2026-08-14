@@ -1,5 +1,6 @@
 ---
 name: crisis_response
+user-invocable: false
 description: >
   Use Crisis Response when the user presents with suicide risk, self-harm,
   immediate danger to self or others, abuse, or acute distress requiring

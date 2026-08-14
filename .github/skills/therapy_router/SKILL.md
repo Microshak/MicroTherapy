@@ -1,5 +1,6 @@
 ---
 name: therapy_router
+user-invocable: false
 description: >
   Determines the most appropriate therapeutic approach for the current
   conversation. Selects primary + optional secondary modality based on

@@ -1,5 +1,6 @@
 ---
 name: general_therapy
+user-invocable: false
 description: >
   Use General Therapy when the user needs someone to talk to, empathy,
   validation, or emotional presence without a specific therapeutic modality.

@@ -1,5 +1,6 @@
 ---
 name: acceptance_commitment_therapy
+user-invocable: false
 description: |
   Use Acceptance and Commitment Therapy (ACT) to help users develop
   psychological flexibility by accepting difficult internal experiences,

@@ -75,7 +75,7 @@ EMBEDDED_VIEW_HTML = r"""<!DOCTYPE html>
 <script type="importmap">
 {
   "imports": {
-    "@modelcontextprotocol/ext-apps": "https://esm.sh/@modelcontextprotocol/ext-apps@0.4.1?deps=zod@3.25.1"
+    "@modelcontextprotocol/ext-apps": "https://esm.sh/@modelcontextprotocol/ext-apps@1.7.5"
   }
 }
 </script>
@@ -84,7 +84,7 @@ const $ = id => document.getElementById(id);
 const badge = $('badge'), textEl = $('text'), playBtn = $('playBtn');
 const errorEl = $('error'), debugEl = $('debug');
 
-const SERVER = 'http://localhost:3002';
+const SERVER = 'http://localhost:3001';
 
 function log(msg) {
   console.log('[MT]', msg);

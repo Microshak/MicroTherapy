@@ -1,5 +1,6 @@
 ---
 name: motivational_interviewing
+user-invocable: false
 description: |
   Use Motivational Interviewing (MI) to help users explore ambivalence,
   strengthen intrinsic motivation, and increase commitment to meaningful

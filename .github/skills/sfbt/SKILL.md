@@ -1,5 +1,6 @@
 ---
 name: solution_focused_brief_therapy
+user-invocable: false
 description: |
   Use Solution-Focused Brief Therapy (SFBT) to help users identify strengths,
   resources, exceptions to problems, and practical next steps. Best for users

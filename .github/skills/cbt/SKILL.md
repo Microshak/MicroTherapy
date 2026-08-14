@@ -1,5 +1,6 @@
 ---
 name: cognitive_behavioral_therapy
+user-invocable: false
 description: |
   Use Cognitive Behavioral Therapy (CBT) techniques to help users identify,
   examine, and modify unhelpful thoughts and behaviors. Best for situations

@@ -1,5 +1,6 @@
 ---
 name: therapy_session
+user-invocable: false
 description: >
   Orchestrates a complete therapy session. Loads client context from OKF
   knowledge bundles, opens with rapport-building, routes each turn through
@@ -37,9 +38,9 @@ SESSION START
      ▼
 ┌─────────────────────────────────────────────────────┐
 │  1. LOAD CLIENT CONTEXT                              │
-│     - Read knowledge/clients/{id}/profile.md         │
-│     - Read knowledge/clients/{id}/plan.md            │
-│     - Read knowledge/clients/{id}/history.md (last)  │
+│     - Read knowledge/clients/{id}/therapy/profile.md │
+│     - Read knowledge/clients/{id}/therapy/plan.md    │
+│     - Read knowledge/clients/{id}/therapy/history.md (last) │
 │     - If new client: create bundle from templates    │
 └──────────────────────┬──────────────────────────────┘
                        ▼
@@ -89,7 +90,7 @@ SESSION START
 
 ## 1. Load Client Context
 
-At session start, read the client's OKF bundle from `knowledge/clients/{client-id}/`.
+At session start, read the client's OKF bundle from `knowledge/clients/{client-id}/therapy/`.
 
 ### Files to Read
 
@@ -101,22 +102,25 @@ At session start, read the client's OKF bundle from `knowledge/clients/{client-i
 
 ### New Client Detection
 
-If `knowledge/clients/{client-id}/` does not exist:
+If `knowledge/clients/{client-id}/therapy/` does not exist:
 
 ```
-1. CREATE knowledge/clients/{id}/ directory
-2. COPY templates from knowledge/_templates/:
+1. CREATE knowledge/clients/{id}/ directory (if needed)
+2. CREATE knowledge/clients/{id}/therapy/ directory
+3. COPY templates from knowledge/_templates/ into therapy/:
    - profile.md (fill in name, date, leave sections empty)
    - plan.md (empty priority queue)
    - history.md (empty)
    - log.md (creation entry)
-3. CREATE index.md for the client bundle
+4. CREATE index.md for the client bundle in both locations:
+   - knowledge/clients/{id}/index.md (parent, links to therapy/)
+   - knowledge/clients/{id}/therapy/index.md (therapy bundle index)
 
-4. OPEN with:
+5. OPEN with:
    "Hi, I'm glad you're here. Before we dive in, tell me a little
     about what brings you here today. What's been on your mind?"
 
-5. After intake, POPULATE profile.md and plan.md from what you learned
+6. After intake, POPULATE therapy/profile.md and therapy/plan.md from what you learned
 ```
 
 ### Client ID Convention

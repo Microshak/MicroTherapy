@@ -118,30 +118,33 @@ for mod_name in sorted(VALID_MODALITIES):
 # Clients
 print("  --- Clients ---")
 check((KNOWLEDGE_DIR / "clients" / "index.md").is_file(), "clients/index.md exists")
-alice_dir = KNOWLEDGE_DIR / "clients" / "alice"
-check(alice_dir.is_dir(), "clients/alice/ directory exists")
+mike_dir = KNOWLEDGE_DIR / "clients" / "mike"
+check(mike_dir.is_dir(), "clients/mike/ directory exists")
+check((mike_dir / "index.md").is_file(), "clients/mike/index.md exists")
+
+mike_therapy_dir = mike_dir / "therapy"
+check(mike_therapy_dir.is_dir(), "clients/mike/therapy/ directory exists")
 for fname in REQUIRED_CLIENT_FILES:
-    check((alice_dir / fname).is_file(), f"clients/alice/{fname} exists")
+    check((mike_therapy_dir / fname).is_file(), f"clients/mike/therapy/{fname} exists")
 
-# Alice profile validation
-alice_profile = parse_frontmatter(alice_dir / "profile.md")
-check(alice_profile and alice_profile.get("type") == "ClientProfile", "Alice profile type=ClientProfile")
-check(alice_profile and alice_profile.get("client_id") == "alice", "Alice profile client_id=alice")
-check(alice_profile and alice_profile.get("status") == "active", "Alice profile status=active")
-check(alice_profile and alice_profile.get("total_sessions") == 1, "Alice profile total_sessions=1")
+# Mike profile validation
+mike_profile = parse_frontmatter(mike_therapy_dir / "profile.md")
+check(mike_profile and mike_profile.get("type") == "ClientProfile", "Mike profile type=ClientProfile")
+check(mike_profile and mike_profile.get("client_id") == "mike", "Mike profile client_id=mike")
+check(mike_profile and mike_profile.get("status") == "active", "Mike profile status=active")
 
-# Alice plan validation
-alice_plan = parse_frontmatter(alice_dir / "plan.md")
-check(alice_plan and alice_plan.get("type") == "TreatmentPlan", "Alice plan type=TreatmentPlan")
-check(alice_plan and alice_plan.get("status") == "active", "Alice plan status=active")
+# Mike plan validation
+mike_plan = parse_frontmatter(mike_therapy_dir / "plan.md")
+check(mike_plan and mike_plan.get("type") == "TreatmentPlan", "Mike plan type=TreatmentPlan")
+check(mike_plan and mike_plan.get("status") == "active", "Mike plan status=active")
 
-# Alice history validation
-alice_history = parse_frontmatter(alice_dir / "history.md")
-check(alice_history and alice_history.get("type") == "SessionHistory", "Alice history type=SessionHistory")
+# Mike history validation
+mike_history = parse_frontmatter(mike_therapy_dir / "history.md")
+check(mike_history and mike_history.get("type") == "SessionHistory", "Mike history type=SessionHistory")
 
-# Alice log validation
-alice_log = parse_frontmatter(alice_dir / "log.md")
-check(alice_log and alice_log.get("type") == "ChangeLog", "Alice log type=ChangeLog")
+# Mike log validation
+mike_log = parse_frontmatter(mike_therapy_dir / "log.md")
+check(mike_log and mike_log.get("type") == "ChangeLog", "Mike log type=ChangeLog")
 
 
 # ─── 2. Skill Files ───────────────────────────────────────────────────────

@@ -27,6 +27,9 @@ dependencies = [
     "starlette>=0.46.0",
     "pydantic>=2.0.0",
     "python-dotenv>=1.0.0",
+    "numpy<2",
+    "spacy<4",
+    "thinc<9",
 ]
 
 [project.optional-dependencies]

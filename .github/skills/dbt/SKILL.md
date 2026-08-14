@@ -1,5 +1,6 @@
 ---
 name: dialectical_behavior_therapy
+user-invocable: false
 description: |
   Use Dialectical Behavior Therapy (DBT) to help users manage overwhelming
   emotions, tolerate distress, improve relationships, and respond more

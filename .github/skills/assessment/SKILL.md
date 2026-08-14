@@ -1,5 +1,6 @@
 ---
 name: therapy_assessment
+user-invocable: false
 description: >
   Quickly assess a user's therapeutic needs before selecting a modality.
   Determines the presenting concern, dominant emotion, stage of change,
