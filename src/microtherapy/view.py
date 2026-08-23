@@ -97,6 +97,8 @@ const errorEl = $('error'), debugEl = $('debug');
 const SERVER = 'http://localhost:3001';
 
 let lastQueueId = null;  // most recent speak queue, for replay
+let playRunId = 0;      // increments each collectAndPlay — stale loops abort
+let activeQueue = null; // queue currently being played
 
 function log(msg) {
   console.log('[MT]', msg);
@@ -174,11 +176,16 @@ function buildWav(pcmBytes, sampleRate) {
 }
 
 async function collectAndPlay(queueId) {
+  if (activeQueue === queueId) { log('Already playing ' + queueId); return; }
+  activeQueue = queueId;
+  const myRun = ++playRunId;
+  const stillCurrent = () => playRunId === myRun && activeQueue === queueId;
   log('Waiting for audio: ' + queueId);
   badge.textContent = 'Generating...';
 
   // Phase 1: poll lightweight status until the server finishes generating
   for (let i = 0; i < 720; i++) {   // up to ~6 min at 500ms
+    if (!stillCurrent()) { log('Superseded, aborting poll'); return; }
     let data;
     try {
       data = await callTool('get_speak_status', { audio_id: queueId });
@@ -190,34 +197,48 @@ async function collectAndPlay(queueId) {
 
     if (data.status === 'complete') {
       badge.textContent = 'Downloading...';
-      return fetchAndPlay(queueId);
+      try {
+        await fetchAndPlay(queueId, myRun);
+      } catch(e) {
+        log('fetchAndPlay threw: ' + e);
+        badge.textContent = '⚠ ' + (e?.message || e);
+      }
+      activeQueue = null;
+      return;
     } else if (data.status === 'error') {
       log('Server error: ' + (data.error || 'unknown'));
       badge.textContent = '⚠ ' + (data.error || 'Error');
+      activeQueue = null;
       return;
     } else {
-      const secs = Math.round((data.progress_ms || 0) / 1000);
-      badge.textContent = secs > 0 ? ('Generating... ' + secs + 's') : 'Generating...';
+      if (stillCurrent()) {
+        const secs = Math.round((data.progress_ms || 0) / 1000);
+        badge.textContent = secs > 0 ? ('Generating... ' + secs + 's') : 'Generating...';
+      }
       await new Promise(r => setTimeout(r, 500));
     }
   }
 
   log('Timed out waiting for audio');
   badge.textContent = '⚠ Timeout — click Replay';
+  activeQueue = null;
 }
 
 // Phase 2: download the ONE complete WAV file, then play it
-async function fetchAndPlay(queueId) {
+async function fetchAndPlay(queueId, myRun) {
+  const stillCurrent = () => playRunId === myRun;
   // Preferred: plain file endpoint (simple GET, no JSON/SSE/base64)
   const fileUrl = SERVER + '/audio/' + queueId + '.wav';
   for (let attempt = 0; attempt < 4; attempt++) {
+    if (!stillCurrent()) { log('Superseded, aborting download'); return; }
     try {
       const resp = await fetch(fileUrl);
       if (resp.ok) {
         const buf = await resp.arrayBuffer();
         if (buf.byteLength > 44) {
           log('Downloaded WAV via /audio: ' + buf.byteLength + ' bytes');
-          return playArrayBuffer(buf);
+          await playArrayBuffer(buf, myRun);
+          return;
         }
       }
       log('File endpoint returned ' + resp.status + ' — trying MCP tool');
@@ -226,7 +247,8 @@ async function fetchAndPlay(queueId) {
       if (data.status === 'complete' && data.audio_b64) {
         log('Got full WAV via MCP tool, ' + data.duration_ms + 'ms');
         const wavBytes = Uint8Array.from(atob(data.audio_b64), c => c.charCodeAt(0));
-        return playArrayBuffer(wavBytes.buffer.slice(0));
+        await playArrayBuffer(wavBytes.buffer.slice(0), myRun);
+        return;
       }
       if (data.status === 'waiting') {
         // Rare race: status said complete but WAV not built yet — retry soon
@@ -244,29 +266,54 @@ async function fetchAndPlay(queueId) {
   badge.textContent = '⚠ Download error — click Replay';
 }
 
-async function playArrayBuffer(arrayBuffer) {
-  const ctx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 24000 });
-  if (ctx.state === 'suspended') {
-    try { await ctx.resume(); } catch(e) { log('resume failed: ' + e); }
+async function playArrayBuffer(arrayBuffer, myRun) {
+  const stillCurrent = () => playRunId === myRun;
+
+  let ctx;
+  try {
+    ctx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 24000 });
+  } catch(e) {
+    log('AudioContext failed: ' + e);
+    badge.textContent = '⚠ Audio error: ' + (e?.message || e);
+    return;
   }
+
+  if (ctx.state === 'suspended') {
+    try {
+      // Never hang forever: some browsers keep resume() pending without a user gesture
+      await Promise.race([
+        ctx.resume(),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('resume timeout')), 1500))
+      ]);
+    } catch(e) {
+      log('resume failed/timed out: ' + e);
+    }
+  }
+
+  if (!stillCurrent()) { try { ctx.close(); } catch(e) {} return; }
+
   if (ctx.state === 'suspended') {
     // Autoplay blocked by the browser — user must click to hear audio
     log('Autoplay blocked — click 🔁 Replay Speech');
     badge.textContent = '🔊 Ready — click Replay';
+    try { ctx.close(); } catch(e) {}
     return;
   }
 
   try {
+    badge.textContent = 'Decoding...';
     const audioBuffer = await ctx.decodeAudioData(arrayBuffer);
+    if (!stillCurrent()) { try { ctx.close(); } catch(e) {} return; }
     const source = ctx.createBufferSource();
     source.buffer = audioBuffer;
     source.connect(ctx.destination);
     badge.textContent = 'Playing...';
-    source.onended = () => { badge.textContent = 'Done ✓'; ctx.close(); };
+    source.onended = () => { badge.textContent = 'Done ✓'; try { ctx.close(); } catch(e) {} };
     source.start(0);
   } catch(e) {
     log('decodeAudioData failed: ' + e);
-    badge.textContent = '⚠ Decode error';
+    badge.textContent = '⚠ Decode error: ' + (e?.message || e);
+    try { ctx.close(); } catch(e2) {}
   }
 }
 
@@ -321,6 +368,7 @@ async function replaySpeech() {
       textEl.textContent = 'Nothing to replay — no speech has been generated in this session.';
     } else {
       log('Replaying queue: ' + queueId);
+      activeQueue = null;   // force restart even if an auto loop is stuck
       await collectAndPlay(queueId);
     }
   } catch (e) {
